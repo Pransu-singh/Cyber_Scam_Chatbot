@@ -3,7 +3,6 @@ document.addEventListener("DOMContentLoaded", function () {
     const userInput = document.getElementById("user-input");
     const sendButton = document.getElementById("send-button");
 
-    // Check if elements exist
     if (!chatBody || !userInput || !sendButton) {
         console.error("Missing elements! Check your HTML IDs.");
         return;
@@ -14,22 +13,52 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!message) return;
 
         // Append user message
-        chatBody.innerHTML += `<p class="user-message">You: ${message}</p>`;
+        chatBody.innerHTML += `<p class="user-message"><b>You:</b> ${message}</p>`;
         userInput.value = "";
+        chatBody.scrollTop = chatBody.scrollHeight;
 
-        // Send message to Flask backend
+        // Create bot message container (for streaming)
+        const botMessageElement = document.createElement("p");
+        botMessageElement.classList.add("bot-message");
+        botMessageElement.innerHTML = "<b>Bot:</b> ";
+        chatBody.appendChild(botMessageElement);
+
+        // Fetch response from backend
         fetch("http://127.0.0.1:5000/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ message: message })
         })
-        .then(response => response.json())
-        .then(data => {
-            chatBody.innerHTML += `<div class="message bot-message"><b>Bot:</b> ${data.response.replace(/\n/g, '<br>')}</div>`;
+        .then(response => {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
 
-            chatBody.scrollTop = chatBody.scrollHeight;
+            function readStream() {
+                return reader.read().then(({ done, value }) => {
+                    if (done) return;
+
+                    const textChunk = decoder.decode(value, { stream: true });
+
+                    // Check for website safety response
+                    if (textChunk.includes("⚠️ Warning")) {
+                        botMessageElement.innerHTML = `<b>Bot:</b> <span style="color: red; font-weight: bold;">${textChunk.replace(/\n/g, "<br>")}</span>`;
+                    } else if (textChunk.includes("✅")) {
+                        botMessageElement.innerHTML = `<b>Bot:</b> <span style="color: green; font-weight: bold;">${textChunk.replace(/\n/g, "<br>")}</span>`;
+                    } else {
+                        botMessageElement.innerHTML += textChunk.replace(/\n/g, "<br>");
+                    }
+
+                    chatBody.scrollTop = chatBody.scrollHeight;
+                    return readStream();
+                });
+            }
+
+            return readStream();
         })
-        .catch(error => console.error("Error:", error));
+        .catch(error => {
+            botMessageElement.innerHTML += "<br><b style='color: red;'>⚠️ Error fetching response.</b>";
+            console.error("Error:", error);
+        });
     }
 
     sendButton.addEventListener("click", sendMessage);
